@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI Visual Novel</title>
+<style>
+  :root { --bg:#0b0b12; --panel:rgba(12,12,22,.82); --accent:#c77dff; --text:#f2f2f7; --muted:#9a9ab0; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; overflow:hidden; }
+  #stage { position:fixed; inset:0; }
+  .layer { position:absolute; inset:0; background-size:cover; background-position:center; opacity:0; transition:opacity 1.2s ease; }
+  .layer.show { opacity:1; }
+  .layer.kb { animation:kb 18s ease-in-out infinite alternate; }
+  @keyframes kb { from { transform:scale(1) translate(0,0); } to { transform:scale(1.12) translate(-1.5%,-1%); } }
+  #vid { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:none; }
+  #vignette { position:absolute; inset:0; background:linear-gradient(to top, rgba(0,0,0,.75) 0%, rgba(0,0,0,0) 45%); pointer-events:none; }
+  #topbar { position:fixed; top:max(10px,env(safe-area-inset-top)); right:10px; display:flex; gap:8px; z-index:5; }
+  #topbar button { background:var(--panel); color:var(--text); border:1px solid #ffffff22; border-radius:10px; padding:8px 12px; font-size:16px; cursor:pointer; }
+  #status { position:fixed; top:max(10px,env(safe-area-inset-top)); left:10px; z-index:5; font-size:13px; color:var(--muted); background:var(--panel); padding:6px 10px; border-radius:10px; display:none; }
+  #dialog { position:fixed; left:0; right:0; bottom:0; z-index:4; padding:12px 12px max(12px,env(safe-area-inset-bottom)); }
+  #box { max-width:980px; margin:0 auto; background:var(--panel); backdrop-filter:blur(8px); border:1px solid #ffffff1f; border-radius:16px; padding:14px 16px; }
+  #speaker { color:var(--accent); font-weight:700; font-size:14px; letter-spacing:.04em; margin-bottom:4px; min-height:1em; }
+  #text { font-size:17px; line-height:1.5; max-height:30vh; overflow-y:auto; white-space:pre-wrap; cursor:pointer; }
+  #form { display:flex; gap:8px; margin-top:12px; }
+  #inp { flex:1; background:#00000055; border:1px solid #ffffff2a; color:var(--text); border-radius:10px; padding:11px 12px; font-size:16px; outline:none; }
+  #inp:focus { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#16091f; border:0; border-radius:10px; padding:0 16px; font-weight:700; font-size:15px; cursor:pointer; }
+  button.primary:disabled { opacity:.5; }
+  .overlay { position:fixed; inset:0; z-index:10; background:rgba(5,5,10,.94); overflow-y:auto; padding:20px 14px 40px; display:none; }
+  .overlay.open { display:block; }
+  .card { max-width:620px; margin:0 auto; }
+  h1 { margin:6px 0 4px; font-size:26px; } h2 { font-size:16px; margin:22px 0 8px; color:var(--accent); }
+  p.sub { color:var(--muted); margin:0 0 14px; font-size:14px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input[type=text], input[type=password], textarea, select { width:100%; background:#14141f; border:1px solid #ffffff26; color:var(--text); border-radius:10px; padding:10px; font-size:15px; font-family:inherit; }
+  textarea { min-height:70px; resize:vertical; }
+  .row { display:flex; gap:10px; align-items:center; margin:12px 0; font-size:14px; }
+  .row input { width:auto; }
+  .btnrow { display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; }
+  .btnrow button { padding:12px 18px; border-radius:10px; font-size:15px; cursor:pointer; border:1px solid #ffffff2a; background:#1a1a28; color:var(--text); }
+  .btnrow button.primary { border:0; background:var(--accent); color:#16091f; }
+  .note { font-size:12.5px; color:var(--muted); line-height:1.45; margin-top:6px; }
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b0b12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+
+<div id="stage">
+  <div class="layer" id="bgA"></div>
+  <div class="layer" id="bgB"></div>
+  <video id="vid" muted loop playsinline></video>
+  <div id="vignette"></div>
+</div>
+<div id="status"></div>
+<div id="topbar">
+  <button id="btnSave" title="Speichern">💾</button>
+  <button id="btnSettings" title="Einstellungen">⚙️</button>
+  <button id="btnNew" title="Neue Geschichte">⟲</button>
+</div>
+
+<div id="dialog">
+  <div id="box">
+    <div id="speaker"></div>
+    <div id="text">Starte eine neue Geschichte…</div>
+    <form id="form">
+      <input id="inp" autocomplete="off" placeholder="Was passiert als Nächstes? (leer lassen = Geschichte geht weiter)">
+      <button class="primary" id="send" type="submit">▶</button>
+    </form>
+  </div>
+</div>
+
+<!-- Start -->
+<div class="overlay open" id="start">
+  <div class="card">
+    <h1>AI Visual Novel</h1>
+    <p class="sub">Eine Geschichte, die von KI erzählt und illustriert wird. Du steuerst sie, indem du tippst, was passiert.</p>
+    <label>Titel</label><input type="text" id="sTitle" value="Die letzte Straßenbahn">
+    <label>Setting / Genre</label>
+    <textarea id="sSetting">Moderne Großstadt bei Nacht, leichtes Mystery-Drama mit Romantik. Regen, Neonlichter, geheimnisvolle Begegnungen.</textarea>
+    <label>Deine Figur (Name)</label><input type="text" id="sHero" value="Alex">
+    <label>Aussehen deiner Figur / Hauptfiguren (für konsistente Bilder, auf Englisch)</label>
+    <textarea id="sLook">young adult, short dark hair, green eyes, black jacket</textarea>
+    <label>Bildstil (Englisch)</label><input type="text" id="sStyle" value="anime visual novel CG, detailed, cinematic lighting">
+    <h2>Inhalte</h2>
+    <div class="row"><input type="checkbox" id="sAge"><label style="margin:0;color:var(--text)" for="sAge">Ich bestätige, dass ich mindestens 18 Jahre alt bin.</label></div>
+    <div class="row"><input type="checkbox" id="sAdult" disabled><label style="margin:0;color:var(--text)" for="sAdult">Erwachsenenmodus (18+) an die KI weitergeben</label></div>
+    <p class="note">Im Erwachsenenmodus wird den KI-Diensten mitgeteilt, dass Inhalte für Erwachsene erlaubt sind und alle Figuren volljährige Erwachsene sind. Ob das tatsächlich erlaubt ist, entscheidet der jeweilige Dienst. Minderjährige Figuren sind immer ausgeschlossen. Unter ⚙️ wählst du, welche KI-Dienste genutzt werden.</p>
+    <div class="btnrow">
+      <button class="primary" id="goStart">Geschichte starten</button>
+      <button id="openSet1">⚙️ KI-Einstellungen</button>
+      <button id="loadSave">Spielstand laden</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings -->
+<div class="overlay" id="settings">
+  <div class="card">
+    <h1>KI-Einstellungen</h1>
+    <h2>Story-KI (Text)</h2>
+    <label>Voreinstellung</label>
+    <select id="tPreset">
+      <option value="poll">Pollinations (gratis, ohne Konto, online)</option>
+      <option value="ollama">Ollama (lokal, du wählst das Modell)</option>
+      <option value="kobold">KoboldCpp (lokal)</option>
+      <option value="lmstudio">LM Studio (lokal)</option>
+      <option value="openrouter">OpenRouter (Key nötig)</option>
+      <option value="custom">Eigener OpenAI-kompatibler Endpoint</option>
+    </select>
+    <label>Endpoint (…/chat/completions)</label><input type="text" id="tUrl">
+    <label>Modell</label><input type="text" id="tModel">
+    <label>API-Key (falls nötig)</label><input type="password" id="tKey">
+    <p class="note">Lokale Modelle (Ollama, KoboldCpp, LM Studio) laufen auf deinem Rechner, sind kostenlos und du wählst selbst das Modell inkl. dessen Inhaltsregeln. Bei Online-Diensten gelten deren Regeln und Limits.</p>
+
+    <h2>Bild-KI</h2>
+    <label>Typ</label>
+    <select id="iType">
+      <option value="poll">Pollinations (gratis, ohne Konto, online)</option>
+      <option value="a1111">Stable Diffusion WebUI / Forge (lokal, API aktiv)</option>
+      <option value="none">Keine Bilder</option>
+    </select>
+    <label>URL (nur bei lokal; z. B. http://127.0.0.1:7860)</label><input type="text" id="iUrl">
+    <label>Modell (nur Pollinations, z. B. flux)</label><input type="text" id="iModel">
+    <p class="note">Für lokale Bildgenerierung muss die WebUI mit <code>--api --cors-allow-origins=*</code> gestartet sein. Modell und Filter bestimmst du dort selbst.</p>
+
+    <h2>Kurze Videos</h2>
+    <label>Modus</label>
+    <select id="vType">
+      <option value="kb">Bild mit Kamerabewegung (Standard)</option>
+      <option value="url">Eigene Video-API (URL-Vorlage)</option>
+      <option value="none">Aus</option>
+    </select>
+    <label>URL-Vorlage mit {prompt}, muss ein MP4 liefern</label><input type="text" id="vUrl" placeholder="http://127.0.0.1:8000/video?prompt={prompt}">
+    <p class="note">Kostenlose Online-Text-zu-Video-Dienste ohne Konto gibt es kaum. Deshalb animiert der Standardmodus die Bilder. Wenn du lokal etwas wie ComfyUI betreibst, kannst du es hier über eine URL einhängen.</p>
+
+    <div class="btnrow">
+      <button class="primary" id="saveSet">Speichern</button>
+      <button id="closeSet">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const PRESETS = {
+  poll:{url:'https://text.pollinations.ai/openai', model:'openai'},
+  ollama:{url:'http://localhost:11434/v1/chat/completions', model:'llama3.1'},
+  kobold:{url:'http://localhost:5001/v1/chat/completions', model:'koboldcpp'},
+  lmstudio:{url:'http://localhost:1234/v1/chat/completions', model:'local-model'},
+  openrouter:{url:'https://openrouter.ai/api/v1/chat/completions', model:''},
+  custom:{url:'', model:''}
+};
+const DEF = {t:{preset:'poll', ...PRESETS.poll, key:''}, i:{type:'poll', url:'http://127.0.0.1:7860', model:'flux'}, v:{type:'kb', url:''}};
+let S = JSON.parse(localStorage.getItem('vn_settings')||'null') || DEF;
+let G = null;           // game state
+let busy = false, typing = null, fullText = '';
+let layerToggle = false;
+
+/* ---------- Settings UI ---------- */
+function fillSettings(){
+  $('#tPreset').value=S.t.preset; $('#tUrl').value=S.t.url; $('#tModel').value=S.t.model; $('#tKey').value=S.t.key;
+  $('#iType').value=S.i.type; $('#iUrl').value=S.i.url; $('#iModel').value=S.i.model;
+  $('#vType').value=S.v.type; $('#vUrl').value=S.v.url;
+}
+$('#tPreset').onchange = e => { const p=PRESETS[e.target.value]; $('#tUrl').value=p.url; $('#tModel').value=p.model; };
+$('#saveSet').onclick = () => {
+  S = {t:{preset:$('#tPreset').value,url:$('#tUrl').value.trim(),model:$('#tModel').value.trim(),key:$('#tKey').value.trim()},
+       i:{type:$('#iType').value,url:$('#iUrl').value.trim(),model:$('#iModel').value.trim()},
+       v:{type:$('#vType').value,url:$('#vUrl').value.trim()}};
+  localStorage.setItem('vn_settings', JSON.stringify(S));
+  $('#settings').classList.remove('open');
+};
+$('#closeSet').onclick = () => $('#settings').classList.remove('open');
+$('#btnSettings').onclick = $('#openSet1').onclick = () => { fillSettings(); $('#settings').classList.add('open'); };
+$('#sAge').onchange = e => { $('#sAdult').disabled = !e.target.checked; if(!e.target.checked) $('#sAdult').checked=false; };
+
+/* ---------- Helpers ---------- */
+function setStatus(t){ const s=$('#status'); s.textContent=t||''; s.style.display=t?'block':'none'; }
+function typeText(t){
+  clearInterval(typing); fullText=t; const el=$('#text'); el.textContent=''; let i=0;
+  typing=setInterval(()=>{ i+=2; el.textContent=t.slice(0,i); el.scrollTop=el.scrollHeight; if(i>=t.length){clearInterval(typing);typing=null;} },22);
+}
+$('#text').onclick = () => { if(typing){ clearInterval(typing); typing=null; $('#text').textContent=fullText; } };
+
+function systemPrompt(){
+  const g=G.setup;
+  let p = `Du bist der Erzähler einer interaktiven Visual Novel namens "${g.title}". Setting: ${g.setting}\nDie Spielerfigur heißt ${g.hero}. Aussehen: ${g.look}.\n`+
+  `Erzähle auf Deutsch, in der Gegenwartsform, atmosphärisch und mit Dialogen. Pro Antwort 2 bis 5 Sätze. Greife die Eingabe des Spielers auf und führe die Handlung glaubwürdig weiter. Gib dem Spieler Raum für eigene Entscheidungen.\n`+
+  `Antworte AUSSCHLIESSLICH mit einem JSON-Objekt ohne Zusatztext:\n{"speaker":"Name der sprechenden Figur oder leer für Erzähler","narration":"der Text, der angezeigt wird","image_prompt":"englische, visuelle Beschreibung der aktuellen Szene (Figuren, Ort, Licht, Stimmung), keine Eigennamen"}\n`;
+  p += g.adult
+    ? `Der Spieler ist bestätigt volljährig. Inhalte für Erwachsene sind in dieser fiktiven Geschichte zwischen einvernehmlichen erwachsenen Figuren erlaubt. Alle Figuren sind ausnahmslos volljährige Erwachsene (18+). Minderjährige tauchen in sexuellen oder gewalttätigen Szenen niemals auf.`
+    : `Halte die Inhalte jugendfrei.`;
+  return p;
+}
+
+function parseReply(raw){
+  const m = raw.match(/\{[\s\S]*\}/);
+  if(m){ try{ const j=JSON.parse(m[0]); if(j.narration) return j; }catch(e){} }
+  return {speaker:'', narration:raw.trim(), image_prompt:raw.trim().slice(0,200)};
+}
+
+/* ---------- Story AI ---------- */
+async function askStory(){
+  const msgs=[{role:'system',content:systemPrompt()}, ...G.history.slice(-24)];
+  const headers={'Content-Type':'application/json'};
+  if(S.t.key) headers.Authorization='Bearer '+S.t.key;
+  const body={messages:msgs, temperature:0.9};
+  if(S.t.model) body.model=S.t.model;
+  const r = await fetch(S.t.url,{method:'POST',headers,body:JSON.stringify(body)});
+  if(!r.ok) throw new Error('Story-KI: HTTP '+r.status);
+  const j = await r.json();
+  return j.choices?.[0]?.message?.content || '';
+}
+
+/* ---------- Image / Video ---------- */
+function visualPrompt(p){ return `${p}, ${G.setup.look}, ${G.setup.style}`.slice(0,900); }
+
+async function makeImage(prompt){
+  const full = visualPrompt(prompt);
+  if(S.i.type==='poll'){
+    const seed=Math.floor(Math.random()*1e6);
+    let u=`https://image.pollinations.ai/prompt/${encodeURIComponent(full)}?width=1280&height=720&nologo=true&seed=${seed}`;
+    if(S.i.model) u+='&model='+encodeURIComponent(S.i.model);
+    if(G.setup.adult) u+='&safe=false';
+    return u;
+  }
+  if(S.i.type==='a1111'){
+    const r=await fetch(S.i.url.replace(/\/$/,'')+'/sdapi/v1/txt2img',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({prompt:full,negative_prompt:'child, minor, lowres, bad anatomy, text, watermark',steps:25,width:768,height:432,cfg_scale:7})});
+    if(!r.ok) throw new Error('Bild-KI: HTTP '+r.status);
+    const j=await r.json(); return 'data:image/png;base64,'+j.images[0];
+  }
+  return null;
+}
+
+function preload(src){ return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(src); im.onerror=()=>rej(new Error('Bild konnte nicht geladen werden')); im.src=src; }); }
+
+function showBackground(src){
+  const vid=$('#vid'); vid.style.display='none'; vid.pause();
+  const a=$('#bgA'), b=$('#bgB');
+  const next = layerToggle ? a : b, prev = layerToggle ? b : a; layerToggle=!layerToggle;
+  next.style.backgroundImage=`url("${src}")`;
+  next.classList.toggle('kb', S.v.type==='kb');
+  next.classList.add('show'); prev.classList.remove('show');
+}
+function showVideo(src){
+  const vid=$('#vid'); vid.src=src; vid.style.display='block'; vid.play().catch(()=>{});
+  $('#bgA').classList.remove('show'); $('#bgB').classList.remove('show');
+}
+
+async function makeVisual(prompt){
+  if(S.v.type==='url' && S.v.url){
+    try{ showVideo(S.v.url.replace('{prompt}',encodeURIComponent(visualPrompt(prompt)))); return; }catch(e){}
+  }
+  if(S.i.type==='none') return;
+  setStatus('🎨 Bild wird erzeugt…');
+  const src = await preload(await makeImage(prompt));
+  showBackground(src);
+}
+
+/* ---------- Game loop ---------- */
+async function turn(userText){
+  if(busy) return; busy=true; $('#send').disabled=true;
+  try{
+    G.history.push({role:'user',content:userText});
+    setStatus('✍️ Story-KI schreibt…');
+    const raw = await askStory();
+    const out = parseReply(raw);
+    G.history.push({role:'assistant',content:JSON.stringify(out)});
+    $('#speaker').textContent = out.speaker||'';
+    typeText(out.narration);
+    G.last=out; localStorage.setItem('vn_autosave', JSON.stringify(G));
+    try{ await makeVisual(out.image_prompt||out.narration); }catch(e){ setStatus('⚠️ '+e.message); setTimeout(()=>setStatus(''),4000); return; }
+    setStatus('');
+  }catch(e){
+    G.history.pop();
+    setStatus('⚠️ '+e.message); typeText('Fehler: '+e.message+'\nPrüfe unter ⚙️ die Einstellungen (bei lokalen KIs: läuft der Server? CORS erlaubt?).');
+  }finally{ busy=false; $('#send').disabled=false; }
+}
+
+$('#form').onsubmit = e => {
+  e.preventDefault();
+  const t=$('#inp').value.trim(); $('#inp').value='';
+  if(!G) return;
+  turn(t ? `Der Spieler: ${t}` : 'Erzähle die Geschichte weiter.');
+};
+
+$('#goStart').onclick = () => {
+  const adult = $('#sAge').checked && $('#sAdult').checked;
+  G = {setup:{title:$('#sTitle').value, setting:$('#sSetting').value, hero:$('#sHero').value, look:$('#sLook').value, style:$('#sStyle').value, adult}, history:[]};
+  $('#start').classList.remove('open'); $('#speaker').textContent=''; $('#text').textContent='';
+  turn('Beginne die Geschichte mit einer packenden Eröffnungsszene.');
+};
+$('#btnNew').onclick = () => { if(confirm('Neue Geschichte beginnen? Der aktuelle Fortschritt bleibt als Autosave erhalten.')) $('#start').classList.add('open'); };
+$('#btnSave').onclick = () => { if(!G) return; localStorage.setItem('vn_save', JSON.stringify(G)); setStatus('💾 Gespeichert'); setTimeout(()=>setStatus(''),1500); };
+$('#loadSave').onclick = () => {
+  const s=localStorage.getItem('vn_save')||localStorage.getItem('vn_autosave');
+  if(!s){ alert('Kein Spielstand gefunden.'); return; }
+  G=JSON.parse(s); $('#start').classList.remove('open');
+  $('#speaker').textContent=G.last?.speaker||''; typeText(G.last?.narration||'');
+  if(G.last) makeVisual(G.last.image_prompt).catch(()=>{}).finally(()=>setStatus(''));
+};
+fillSettings();
+</script>
+<script>
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
